@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>DST · 营地管理</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main id="login" class="login-shell">
+      <form id="login-form" class="login-card">
+        <span class="brand-mark" aria-hidden="true">⌂</span>
+        <p class="eyebrow">DON’T STARVE TOGETHER</p>
+        <h1>登录管理台</h1>
+        <p class="subtle">登录后管理世界、模组和存档。</p>
+        <label for="login-password">面板密码</label>
+        <input
+          id="login-password"
+          type="password"
+          autocomplete="current-password"
+          required
+          autofocus
+        />
+        <button type="submit" class="primary">登录</button>
+        <p id="login-error" role="alert" class="error"></p>
+        <p class="hint">首次密码在容器启动日志中查看。</p>
+      </form>
+    </main>
+
+    <div id="app" hidden>
+      <header class="masthead">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">⌂</span>
+          <div>
+            <p class="eyebrow">DON’T STARVE TOGETHER</p>
+            <h1>营地管理</h1>
+          </div>
+        </div>
+        <div class="server-state" aria-live="polite">
+          <span id="phase">连接中</span
+          ><span id="shard-status" class="subtle"></span>
+        </div>
+        <div class="header-actions">
+          <button id="restart" class="primary" data-maintenance>
+            重启服务器</button
+          ><button id="open-password" class="quiet">修改密码</button
+          ><button id="logout" class="quiet">退出</button>
+        </div>
+      </header>
+      <div class="shell">
+        <nav aria-label="管理页面">
+          <button data-tab="world" class="active">世界设置</button>
+          <button data-tab="mods">模组管理</button>
+          <button data-tab="archives">存档管理</button>
+          <button data-tab="logs">日志查看</button>
+        </nav>
+        <div id="task-banner" class="notice" role="status" hidden></div>
+        <div id="dirty-notice" class="notice" hidden>
+          配置已保存，重启服务器后生效。地形和资源分布只影响新生成的世界。
+        </div>
+        <section id="tab-world" class="tab">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">世界设置</p>
+              <h2>世界与服务器</h2>
+              <p class="subtle">管理房间信息，以及地面和洞穴的世界参数。</p>
+            </div>
+            <select id="world-shard" aria-label="世界分片">
+              <option value="Master">地面 · Master</option>
+              <option value="Caves">洞穴 · Caves</option>
+            </select>
+          </div>
+          <form id="world-form">
+            <article class="card">
+              <h3>服务器</h3>
+              <div id="cluster-fields" class="field-grid"></div>
+              <label class="field token-field"
+                ><span>Klei 服务器 Token</span
+                ><input
+                  id="cluster-token"
+                  type="password"
+                  autocomplete="off"
+                  placeholder="留空保留现有 Token" /><small
+                  id="token-state"
+                ></small
+              ></label>
+            </article>
+            <article class="card">
+              <div class="section-heading">
+                <div>
+                  <h3>世界参数</h3>
+                  <p class="hint">
+                    修改地形、季节长度等生成参数，不会自动删除或重新生成已有世界。
+                  </p>
+                </div>
+              </div>
+              <div id="world-fields" class="field-grid"></div>
+              <div class="add-row">
+                <input
+                  id="new-world-key"
+                  aria-label="新增世界参数名称"
+                  placeholder="参数名称，如 wildfires"
+                /><input
+                  id="new-world-value"
+                  aria-label="新增世界参数值"
+                  placeholder="参数值，如 default"
+                /><button id="add-world-field" type="button">增加参数</button>
+              </div>
+            </article>
+            <div class="save-bar">
+              <span id="world-unsaved" class="subtle"></span
+              ><button type="submit" class="primary" data-maintenance>
+                保存世界设置
+              </button>
+            </div>
+          </form>
+        </section>
+        <section id="tab-mods" class="tab" hidden>
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">模组管理</p>
+              <h2>服务器模组</h2>
+              <p class="subtle">
+                从模组读取名称、说明和可选值，按存档当前设置编辑。
+              </p>
+            </div>
+            <select id="mods-shard" aria-label="模组分片">
+              <option value="Master">地面 · Master</option>
+              <option value="Caves">洞穴 · Caves</option>
+            </select>
+          </div>
+          <div class="card">
+            <form id="add-mod-form" class="add-row">
+              <input
+                id="new-mod-id"
+                inputmode="numeric"
+                placeholder="创意工坊 ID"
+                aria-label="创意工坊 ID"
+                required
+              /><button type="submit" class="primary" data-maintenance>
+                添加并下载
+              </button>
+            </form>
+            <p class="hint">
+              添加或下载模组会短暂停服，下载完成后恢复运行。这里只管理服务器模组。
+            </p>
+          </div>
+          <div id="mod-list"></div>
+          <div class="save-bar">
+            <label class="check"
+              ><input
+                id="mods-both"
+                type="checkbox"
+              />同时应用到地面和洞穴</label
+            ><span id="mods-unsaved" class="subtle"></span
+            ><button id="save-mods" class="primary" data-maintenance>
+              保存模组设置
+            </button>
+          </div>
+        </section>
+        <section id="tab-archives" class="tab" hidden>
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">存档管理</p>
+              <h2>存档备份与恢复</h2>
+              <p class="subtle">
+                备份由你手动创建。上传只导入文件，恢复时才会替换当前世界。
+              </p>
+            </div>
+          </div>
+          <div class="archive-actions">
+            <article class="card">
+              <h3>创建完整备份</h3>
+              <p class="subtle">两个分片保存退出后打包，完成后恢复运行。</p>
+              <form id="backup-form" class="stack">
+                <input
+                  id="backup-label"
+                  placeholder="备注（可选）"
+                  aria-label="备份备注"
+                  maxlength="128"
+                /><button class="primary" type="submit" data-maintenance>
+                  创建备份
+                </button>
+              </form>
+            </article>
+            <article class="card">
+              <h3>上传已有存档</h3>
+              <p class="subtle" id="upload-hint">
+                支持 ZIP、tar.gz，文件内应包含完整服务器存档。
+              </p>
+              <form id="upload-form" class="stack">
+                <input
+                  id="archive-file"
+                  type="file"
+                  accept=".zip,.tar.gz,.tgz"
+                  required
+                  aria-label="选择存档包"
+                /><button id="upload-button" type="submit">上传并校验</button
+                ><progress
+                  id="upload-progress"
+                  max="100"
+                  value="0"
+                  hidden
+                  aria-label="上传进度"
+                ></progress
+                ><span id="upload-state" class="hint" role="status"></span>
+              </form>
+            </article>
+          </div>
+          <article class="card">
+            <div class="section-heading">
+              <h3>存档包</h3>
+              <button id="refresh-archives" class="quiet">刷新列表</button>
+            </div>
+            <div id="archive-list"></div>
+          </article>
+        </section>
+        <section id="tab-logs" class="tab" hidden>
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">日志查看</p>
+              <h2>运行日志</h2>
+              <p class="subtle">开服、下载和模组报错的详细记录。</p>
+            </div>
+          </div>
+          <article class="card log-card">
+            <div class="log-controls">
+              <select id="log-name" aria-label="日志类型">
+                <option value="panel">管理与运行</option>
+                <option value="master">地面</option>
+                <option value="caves">洞穴</option>
+                <option value="steamcmd">服务端更新</option>
+                <option value="mods">模组下载</option></select
+              ><label class="check"
+                ><input
+                  id="log-follow"
+                  type="checkbox"
+                  checked
+                />自动刷新</label
+              ><button id="reload-log" class="quiet">重新加载</button>
+            </div>
+            <pre id="log-view" tabindex="0" aria-label="日志内容"></pre>
+          </article>
+        </section>
+      </div>
+    </div>
+    <dialog id="password-dialog">
+      <form id="password-form">
+        <div class="section-heading">
+          <h2>修改面板密码</h2>
+          <button
+            id="close-password"
+            type="button"
+            class="quiet"
+            aria-label="关闭"
+          >
+            关闭
+          </button>
+        </div>
+        <label class="field"
+          ><span>当前密码</span
+          ><input
+            id="current-password"
+            type="password"
+            autocomplete="current-password"
+            required /></label
+        ><label class="field"
+          ><span>新密码</span
+          ><input
+            id="new-password"
+            type="password"
+            autocomplete="new-password"
+            minlength="10"
+            maxlength="128"
+            required
+          /><small>10—128 个字符，修改后需要重新登录。</small></label
+        ><label class="field"
+          ><span>再次输入新密码</span
+          ><input
+            id="confirm-password"
+            type="password"
+            autocomplete="new-password"
+            required
+        /></label>
+        <p id="password-error" class="error" role="alert"></p>
+        <button class="primary" type="submit">修改密码</button>
+      </form>
+    </dialog>
+    <div id="toast" role="status" hidden></div>
+  </body>
+</html>
