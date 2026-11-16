@@ -1,5 +1,10 @@
 FROM debian:bookworm-slim
 
+ARG VERSION=dev
+ENV APP_VERSION=$VERSION
+LABEL org.opencontainers.image.version="$VERSION"
+
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates lib32gcc-s1 lib32stdc++6 libstdc++6 libcurl3-gnutls lua5.1 python3 wget \
     && rm -rf /var/lib/apt/lists/*
