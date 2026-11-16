@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 
 from ..core.lua import codec as lua
 from ..core.storage import Error, read_ini, write
+from .world import validate as validate_world
 
 REQUIRED = ("cluster.ini", "Master/server.ini", "Caves/server.ini")
 
@@ -41,10 +42,19 @@ def validate_cluster(root):
             if not 1 <= port <= 65535:
                 raise Error(f"{name} 游戏端口超出范围")
     for shard in ("Master", "Caves"):
-        for name in ("modoverrides.lua", "leveldataoverride.lua"):
+        for name in (
+            "modoverrides.lua",
+            "leveldataoverride.lua",
+            "worldgenoverride.lua",
+        ):
             path = root / shard / name
-            if path.exists() and not isinstance(lua.read(path), dict):
-                raise Error(f"{shard}/{name} 必须返回键值表")
+            if path.exists():
+                value = lua.read(path)
+                if name == "modoverrides.lua":
+                    if not isinstance(value, dict):
+                        raise Error(f"{shard}/{name} 必须返回键值表")
+                else:
+                    validate_world(value, name)
 
 
 class Archives:

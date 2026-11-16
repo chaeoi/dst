@@ -13,6 +13,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from ..core.lua import codec as lua
 from ..core.storage import Error, ini_text, read_ini, write_many
 from ..services.mods import shard_name
+from ..services.world import config_path
+from ..services.world import validate as validate_world
 
 LOGS = {
     "panel": "panel.log",
@@ -204,7 +206,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, r.status())
         elif method == "GET" and path == "/api/world":
             shard = shard_name(query.get("shard", ["Master"])[0])
-            level = r.config.cluster / shard / "leveldataoverride.lua"
+            level = config_path(r.config.cluster, shard)
             data = lua.read(level) if level.exists() else {"overrides": {}}
             self.send(
                 200,
@@ -218,6 +220,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self.body()
             shard = shard_name(body.get("shard"))
             level = body.get("level")
+            path = config_path(r.config.cluster, shard)
+            validate_world(level, path.name)
             if not isinstance(level, dict) or not isinstance(
                 level.get("overrides"), dict
             ):
@@ -238,7 +242,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise Error("人数应为 1—64 的整数") from exc
             contents = {
                 r.config.cluster / "cluster.ini": ini,
-                r.config.cluster / shard / "leveldataoverride.lua": lua.dumps(level),
+                path: lua.dumps(level),
             }
             new_token = body.get("token", "")
             if not isinstance(new_token, str):

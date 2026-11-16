@@ -152,7 +152,7 @@ document.querySelectorAll("nav button").forEach((button) =>
 );
 const phaseNames = {
   starting: "正在启动",
-  running: "进程运行中",
+  running: "世界已就绪",
   maintenance: "正在维护",
   stopped: "已停止",
   error: "需要处理",
@@ -260,7 +260,6 @@ async function loadWorld() {
             { description: "生存", data: "survival" },
             { description: "无尽", data: "endless" },
             { description: "荒野", data: "wilderness" },
-            { description: "轻松", data: "relaxed" },
           ];
         const f = field(
           key,
@@ -268,6 +267,7 @@ async function loadWorld() {
           value,
           (v) => {
             entries[key] = String(v);
+            if (key === "offline_cluster") updateTokenHint();
             dirty("world");
           },
           choices,
@@ -278,41 +278,51 @@ async function loadWorld() {
       }
     }
     $("#cluster-token").value = "";
-    $("#token-state").textContent = state.world.token_configured
-      ? "已配置。留空保留原值。"
-      : "尚未配置。填写后保存，再重启服务器。";
+    updateTokenHint();
     renderWorld();
     dirty("world", false);
   } catch (e) {
     toast("读取世界设置失败：" + e.message, true);
   }
 }
+function updateTokenHint() {
+  $("#token-state").textContent =
+    state.world.sections.NETWORK?.offline_cluster === "true"
+      ? "离线模式不需要 Token。"
+      : state.world.token_configured
+        ? "已配置。留空保留原值。"
+        : "尚未配置。填写后保存，再重启服务器。";
+}
 function renderWorld() {
   const wrap = $("#world-fields");
   wrap.replaceChildren();
   const data =
     state.world.level.overrides || (state.world.level.overrides = {});
-  for (const [key, value] of Object.entries(data)) {
-    wrap.append(
-      field(
-        key,
-        worldLabels[key] || key,
-        value,
-        (v) => {
-          data[key] = v;
-          dirty("world");
-        },
-        null,
-        worldLabels[key] ? key : "",
-      ),
+  const common =
+    $("#world-shard").value === "Caves"
+      ? ["world_size", "day", "earthquakes", "bats"]
+      : Object.keys(worldLabels).filter(
+          (key) => !["earthquakes", "bats"].includes(key),
+        );
+  for (const key of new Set([...common, ...Object.keys(data)])) {
+    const present = Object.hasOwn(data, key);
+    const value = present ? data[key] : "";
+    const inputField = field(
+      key,
+      worldLabels[key] || key,
+      value,
+      (v) => {
+        if (common.includes(key) && v === "") delete data[key];
+        else data[key] = v;
+        dirty("world");
+      },
+      null,
+      common.includes(key) ? key + " · 留空跟随世界预设" : "",
     );
+    if (!present)
+      inputField.querySelector("input").placeholder = "跟随世界预设";
+    wrap.append(inputField);
   }
-  if (!Object.keys(data).length)
-    wrap.append(
-      node("p", "使用游戏默认世界参数，可在下方增加参数。", {
-        className: "subtle",
-      }),
-    );
 }
 $("#world-shard").dataset.previous = "Master";
 $("#world-shard").addEventListener("change", (e) => {

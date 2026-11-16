@@ -13,6 +13,7 @@ from pathlib import Path
 from ..core.storage import Error, ini_text, read_ini, write
 from .archives import Archives, validate_cluster
 from .mods import SHARDS, Mods, shard_name, workshop_id
+from .world import repair_preset_filename
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class Runtime:
             logger.info("没有现有存档，已初始化默认世界配置")
         else:
             logger.info("使用现有存档：%s", c.cluster_name)
+        repair_preset_filename(c.cluster)
         if c.token:
             self.save_token(c.token)
 
@@ -84,6 +86,13 @@ class Runtime:
             and not path.is_symlink()
             and path.stat().st_size <= 2048
             and bool(path.read_text().strip())
+        )
+
+    def needs_token(self, cluster=None):
+        sections = read_ini((cluster or self.config.cluster) / "cluster.ini")
+        return (
+            sections.get("NETWORK", {}).get("offline_cluster", "false").lower()
+            != "true"
         )
 
     @contextmanager
@@ -219,15 +228,20 @@ class Runtime:
     def start_shards(self):
         if self.closing.is_set():
             return
-        if not self.has_token():
+        if self.needs_token() and not self.has_token():
             raise Error("请在世界设置中填写 Klei 服务器 Token，再点击重启服务器")
         validate_cluster(self.config.cluster)
         self.mods.sync()
         self.progress("正在启动地面和洞穴")
         self.phase = "starting"
+        marker = "DST_PANEL_READY_" + uuid.uuid4().hex
+        offsets, buffers, ready = {}, {}, set()
         try:
             for shard in SHARDS:
-                with (self.config.logs / (shard.lower() + ".log")).open("ab") as output:
+                log = self.config.logs / (shard.lower() + ".log")
+                offsets[shard] = log.stat().st_size if log.exists() else 0
+                buffers[shard] = ""
+                with log.open("ab") as output:
                     p = subprocess.Popen(
                         self.config.game_args()
                         + ["-skip_update_server_mods", "-shard", shard],
@@ -239,12 +253,51 @@ class Runtime:
                     )
                     with self.state_lock:
                         self.processes[shard] = p
-            for _ in range(20):
-                if self.closing.wait(0.1):
+            deadline = time.monotonic() + self.config.startup_timeout
+            next_probe = 0
+            while len(ready) < len(SHARDS):
+                if self.closing.wait(0.2):
                     self.stop_shards()
                     return
                 if any(p.poll() is not None for p in self.processes.values()):
                     raise Error("游戏进程启动失败，请查看地面和洞穴日志")
+                now = time.monotonic()
+                if now >= deadline:
+                    raise Error(
+                        "世界加载超时，请查看分片日志；当前存档未被判定为启动成功"
+                    )
+                if now >= next_probe:
+                    for shard, process in self.processes.items():
+                        if shard not in ready:
+                            process.stdin.write(
+                                f'if TheWorld and TheWorld.ismastersim then print("{marker}") end\n'.encode()
+                            )
+                            process.stdin.flush()
+                    next_probe = now + 3
+                for shard in SHARDS:
+                    log = self.config.logs / (shard.lower() + ".log")
+                    if log.stat().st_size < offsets[shard]:
+                        offsets[shard] = 0
+                    with log.open("rb") as handle:
+                        handle.seek(offsets[shard])
+                        chunk = handle.read(262144)
+                        offsets[shard] = handle.tell()
+                    lines = (
+                        buffers[shard] + chunk.decode("utf-8", errors="replace")
+                    ).split("\n")
+                    buffers[shard] = lines.pop()[-65536:]
+                    for line in lines:
+                        if any(
+                            text in line
+                            for text in (
+                                "LUA ERROR",
+                                "Account Failed",
+                                "Server failed to start",
+                            )
+                        ):
+                            raise Error(f"{shard} 世界启动失败，请查看对应分片日志")
+                        if line.split("]:", 1)[-1].strip() == marker:
+                            ready.add(shard)
         except Exception:
             self.stop_shards()
             raise
@@ -289,7 +342,9 @@ class Runtime:
                 not token_path.exists() or not token_path.read_text().strip()
             ) and self.has_token():
                 shutil.copyfile(c.cluster / "cluster_token.txt", token_path)
-            if not token_path.exists() or not token_path.read_text().strip():
+            if self.needs_token(staged) and (
+                not token_path.exists() or not token_path.read_text().strip()
+            ):
                 raise Error("上传的存档没有 Token，请先在世界设置中填写服务器 Token")
             self.progress("正在保存并停止当前世界")
             if not self.stop_shards():
@@ -313,6 +368,7 @@ class Runtime:
     def _job(self, action, kwargs):
         result = None
         with self.lock:
+            was_running = any(p.poll() is None for p in self.processes.values())
             self.error = ""
             self.phase = "maintenance" if action != "start" else "starting"
             try:
@@ -359,9 +415,11 @@ class Runtime:
                 self.error = str(exc)
                 if (
                     not self.closing.is_set()
+                    and was_running
+                    and action in ("backup", "download")
                     and not self.processes
                     and self.config.binary.exists()
-                    and self.has_token()
+                    and (self.has_token() or not self.needs_token())
                 ):
                     try:
                         self.start_shards()

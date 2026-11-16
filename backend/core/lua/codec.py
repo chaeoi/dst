@@ -1,5 +1,6 @@
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,10 +12,16 @@ def read(path, mode="config", folder=""):
     path = Path(path)
     if path.is_symlink() or path.stat().st_size > 2 * 1024 * 1024:
         raise Error("配置文件为链接或超过 2 MB")
+    source = path.read_bytes().removeprefix(b"\xef\xbb\xbf")
+    if source.startswith(b"KLEI"):
+        header = re.match(rb"KLEI[ \t]+1[ \t]+", source)
+        if not header:
+            raise Error("配置文件使用了不支持的 KLEI 编码，原文件已保留")
+        source = source[header.end() :]
     try:
         result = subprocess.run(
             [sys.executable, str(Path(__file__).with_name("reader.py")), mode, folder],
-            input=path.read_bytes(),
+            input=source,
             capture_output=True,
             timeout=5,
             check=False,

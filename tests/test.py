@@ -16,7 +16,7 @@ from backend.api.server import Server
 from backend.core.auth import Auth
 from backend.core.config import Config
 from backend.core.lua import codec as lua
-from backend.core.storage import Error, write_many
+from backend.core.storage import Error, ini_text, read_ini, write_many
 from backend.services.runtime import Runtime
 
 
@@ -33,6 +33,7 @@ class Fixture(unittest.TestCase):
                 "DST_CLUSTER_NAME": "Cluster_1",
                 "DST_CLUSTER_TOKEN": "test-only-token",
                 "DST_SHUTDOWN_TIMEOUT": "2",
+                "DST_STARTUP_TIMEOUT": "5",
             },
         )
         self.env.start()
@@ -45,7 +46,7 @@ class Fixture(unittest.TestCase):
         binary = self.config.binary
         binary.parent.mkdir(parents=True, exist_ok=True)
         binary.write_text("""#!/usr/bin/env python3
-import sys,time
+import sys,time,re
 from pathlib import Path
 args=sys.argv
 if '-only_update_server_mods' in args:
@@ -54,6 +55,8 @@ root=Path(args[args.index('-persistent_storage_root')+1])/args[args.index('-conf
 shard=args[args.index('-shard')+1]
 print('world process started',flush=True)
 for line in sys.stdin:
+    if 'DST_PANEL_READY_' in line:
+        print(re.search(r'DST_PANEL_READY_[0-9a-f]+',line).group(0),flush=True)
     if 'c_shutdown' in line:
         time.sleep(0.05 if shard=='Master' else 0.35)
         (root/shard/'saved-marker').write_text('saved')
@@ -69,6 +72,63 @@ for line in sys.stdin:
 
 
 class ConfigTests(Fixture):
+    def test_native_klei_world_config_header_is_readable(self):
+        path = self.root / "worldgenoverride.lua"
+        value = {
+            "override_enabled": True,
+            "worldgen_preset": "SURVIVAL_TOGETHER",
+            "settings_preset": "SURVIVAL_TOGETHER",
+            "overrides": {},
+        }
+        path.write_bytes(b"KLEI     1 " + lua.dumps(value).encode())
+        self.assertEqual(lua.read(path), value)
+
+    def test_misnamed_preset_is_repaired_without_losing_settings(self):
+        path = self.config.cluster / "Master/worldgenoverride.lua"
+        value = lua.read(path)
+        value["overrides"]["wildfires"] = "never"
+        path.rename(path.with_name("leveldataoverride.lua"))
+        path.with_name("leveldataoverride.lua").write_text(lua.dumps(value))
+        self.runtime.initialize()
+        self.assertEqual(lua.read(path)["overrides"]["wildfires"], "never")
+        self.assertFalse(path.with_name("leveldataoverride.lua").exists())
+
+    def test_echoed_probe_is_not_accepted_as_ready(self):
+        self.fake_game()
+        self.config.startup_timeout = 1
+        binary = self.config.binary
+        code = binary.read_text().replace(
+            "print(re.search(r'DST_PANEL_READY_[0-9a-f]+',line).group(0),flush=True)",
+            "print('RemoteCommandInput: '+line.strip(),flush=True)",
+        )
+        binary.write_text(code)
+        with self.assertRaisesRegex(Error, "世界加载超时"):
+            self.runtime.start_shards()
+        self.assertFalse(self.runtime.processes)
+
+    def test_lua_error_during_world_load_rejects_start(self):
+        self.fake_game()
+        binary = self.config.binary
+        binary.write_text(
+            binary.read_text().replace(
+                "world process started", "LUA ERROR: startup failed"
+            )
+        )
+        with self.assertRaisesRegex(Error, "世界启动失败"):
+            self.runtime.start_shards()
+        self.assertFalse(self.runtime.processes)
+
+    def test_offline_server_does_not_require_a_token(self):
+        path = self.config.cluster / "cluster.ini"
+        sections = read_ini(path)
+        sections["NETWORK"]["offline_cluster"] = "true"
+        path.write_text(ini_text(sections))
+        (self.config.cluster / "cluster_token.txt").unlink()
+        self.fake_game()
+        self.runtime.start_shards()
+        self.assertFalse(self.runtime.has_token())
+        self.assertTrue(all(self.runtime.status()["shards"].values()))
+
     def test_interrupted_restore_rolls_back_before_boot(self):
         previous = self.config.panel / "restore-previous"
         shutil.copytree(self.config.cluster, previous)

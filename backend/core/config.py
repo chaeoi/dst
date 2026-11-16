@@ -20,6 +20,7 @@ class Config:
         self.host = os.getenv("DST_WEB_BIND", "0.0.0.0")
         self.port = int(os.getenv("DST_WEB_PORT", "8080"))
         self.shutdown_timeout = int(os.getenv("DST_SHUTDOWN_TIMEOUT", "60"))
+        self.startup_timeout = int(os.getenv("DST_STARTUP_TIMEOUT", "300"))
         self.upload_limit = int(os.getenv("DST_UPLOAD_LIMIT_MB", "512")) * 1024 * 1024
         self.unpack_limit = 2 * 1024 * 1024 * 1024
         self.cookie_secure = os.getenv("DST_COOKIE_SECURE", "0") == "1"
@@ -27,6 +28,7 @@ class Config:
         if (
             not 1 <= self.port <= 65535
             or self.shutdown_timeout < 1
+            or self.startup_timeout < 1
             or self.upload_limit < 1
         ):
             raise ValueError("端口、停服超时或上传限制不合法")
